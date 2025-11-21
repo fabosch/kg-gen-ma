@@ -1,3 +1,4 @@
+import time
 from typing import Union, List, Dict, Optional
 
 from kg_gen.steps._1_get_entities import get_entities
@@ -11,6 +12,7 @@ import dspy
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import litellm
 import networkx as nx
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -158,6 +160,7 @@ class KGGen:
         cluster: bool = False,
         temperature: float = None,
         output_folder: Optional[str] = None,
+        max_workers: int = 4
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -219,7 +222,7 @@ class KGGen:
             entities = set()
             relations = set()
 
-            with ThreadPoolExecutor() as executor:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_chunk = {
                     executor.submit(_process, chunk, self.lm): chunk for chunk in chunks
                 }
@@ -288,7 +291,7 @@ class KGGen:
     def classify_entities(
         self,
         graph: Graph,
-        processed_input: str,
+        classification_context: str,
         ontology_definition: str,
         ontology_classes: List[str],
         chunk_size: Optional[int] = None,
@@ -296,6 +299,7 @@ class KGGen:
         temperature: float = None,
         api_key: str = None,
         api_base: str = None,
+        max_workers: int = 4
     ) -> Graph:
         if len(ontology_classes) == 0:
             print("No ontology classes provided, skipping classification step.")
@@ -309,24 +313,31 @@ class KGGen:
                 api_key=api_key or self.api_key,
                 api_base=api_base or self.api_base,
             )
-        def _process(content, lm):
-            with dspy.context(lm=lm):                 
-                classified_entries = classify_ontology_entities(
-                    input_data=content,
-                    entities=graph.entities,
-                    ontology_definition=ontology_definition,
-                    ontology_classes=ontology_classes
-                )
-                    
-            return classified_entries
+            
+        def _process(classification_context, lm):
+            try:
+                with dspy.context(lm=lm):
+                    print("Running ontology classification with chunk of size:", len(classification_context))    
+                    classified_entries = classify_ontology_entities(
+                        classification_context=classification_context,
+                        entities=graph.entities,
+                        ontology_definition=ontology_definition,
+                        ontology_classes=ontology_classes
+                    )
+                return classified_entries
+            
+            except litellm.RateLimitError:
+                print("Rate limit exceeded, retrying after 5 second delay...")
+                time.sleep(5)  # Wait before retrying
+                return _process(classification_context, lm)
         
         if not chunk_size:
-            classified_entries = _process(processed_input, self.lm)
+            classified_entries = _process(classification_context, self.lm)
         else:
-            chunks = chunk_text(processed_input, chunk_size)
+            chunks = chunk_text(classification_context, chunk_size)
             classified_entries = set()
 
-            with ThreadPoolExecutor() as executor:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_chunk = {
                     executor.submit(_process, chunk, self.lm): chunk for chunk in chunks
                 }

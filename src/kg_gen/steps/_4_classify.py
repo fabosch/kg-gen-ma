@@ -33,18 +33,18 @@ def get_classification_sig(ontology: str) -> dspy.Signature:
     
     
 def classify_ontology_entities(
-    input_data: str,
+    classification_context: str,
     entities: list[str],
     ontology_definition: str,
     ontology_classes: List[str],
 ) -> List[Tuple[str, str]]:
     classification_sig = get_classification_sig(ontology_definition)
-    
     try:
         extract = dspy.Predict(classification_sig)
-        result = extract(source_text=input_data, entities=entities, ontology_classes=ontology_classes)
+        result = extract(source_text=classification_context, entities=entities, ontology_classes=ontology_classes)
     except Exception as e:
         print("Got exception during classification")
+        print(e)
         return []
     
     classifications: list[ClassificationRelation] = result.classifications
