@@ -300,7 +300,7 @@ class KGGen:
         temperature: float = None,
         api_key: str = None,
         api_base: str = None,
-        max_workers: int = 4,
+        max_workers: int = 64,
         logger: Optional[logging.Logger] = None,
     ) -> Graph:
         if len(ontology_classes) == 0:

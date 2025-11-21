@@ -14,5 +14,5 @@ def dedup_cluster_graph(
     # Deduplicate the semantic deduplicated graph using LLM
     llm_deduplicate = LLMDeduplicate(retrieval_model, lm, deduplicated_graph)
     llm_deduplicate.cluster()
-    llm_deduplicated_graph = llm_deduplicate.deduplicate()
+    llm_deduplicated_graph = llm_deduplicate.deduplicate(max_workers=max_workers)
     return llm_deduplicated_graph
