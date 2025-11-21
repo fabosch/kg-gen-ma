@@ -316,13 +316,13 @@ class KGGen:
                 api_base=api_base or self.api_base,
             )
             
-        def _process(classification_context, lm):
+        def _process(classification_context_chunk, lm):
             try:
                 with dspy.context(lm=lm):
                     if logger:
-                        logger.info(f"Classifying ontology entities... (size: {len(classification_context)})")
+                        logger.info(f"Classifying ontology entities... (size: {len(classification_context_chunk)}/{len(classification_context)})")
                     classified_entries = classify_ontology_entities(
-                        classification_context=classification_context,
+                        classification_context=classification_context_chunk,
                         entities=graph.entities,
                         ontology_definition=ontology_definition,
                         ontology_classes=ontology_classes
@@ -333,7 +333,7 @@ class KGGen:
                 if logger:
                     logger.warning("Rate limit exceeded, retrying after 5 second delay...")
                 time.sleep(5)  # Wait before retrying
-                return _process(classification_context, lm)
+                return _process(classification_context_chunk, lm)
         
         if not chunk_size:
             classified_entries = _process(classification_context, self.lm)
