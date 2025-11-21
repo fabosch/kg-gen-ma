@@ -299,7 +299,8 @@ class KGGen:
         temperature: float = None,
         api_key: str = None,
         api_base: str = None,
-        max_workers: int = 4
+        max_workers: int = 4,
+        logger: Optional[logging.Logger] = None,
     ) -> Graph:
         if len(ontology_classes) == 0:
             print("No ontology classes provided, skipping classification step.")
@@ -317,7 +318,8 @@ class KGGen:
         def _process(classification_context, lm):
             try:
                 with dspy.context(lm=lm):
-                    print("Running ontology classification with chunk of size:", len(classification_context))    
+                    if logger:
+                        logger.info(f"Classifying ontology entities... (size: {len(classification_context)})")
                     classified_entries = classify_ontology_entities(
                         classification_context=classification_context,
                         entities=graph.entities,
@@ -327,7 +329,8 @@ class KGGen:
                 return classified_entries
             
             except litellm.RateLimitError:
-                print("Rate limit exceeded, retrying after 5 second delay...")
+                if logger:
+                    logger.warning("Rate limit exceeded, retrying after 5 second delay...")
                 time.sleep(5)  # Wait before retrying
                 return _process(classification_context, lm)
         
