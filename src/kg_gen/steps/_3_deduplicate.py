@@ -6,7 +6,7 @@ import dspy
 
 
 def dedup_cluster_graph(
-    retrieval_model: SentenceTransformer, lm: dspy.LM, graph: Graph
+    retrieval_model: SentenceTransformer, lm: dspy.LM, graph: Graph, max_workers: int = 4
 ) -> Graph:
     # Deduplicate the graph using semantic hashing
     deduplicated_graph = deduplicate_graph(graph)

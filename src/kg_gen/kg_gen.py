@@ -272,6 +272,7 @@ class KGGen:
         temperature: float = None,
         api_key: str = None,
         api_base: str = None,
+        max_workers: int = 4,
     ) -> Graph:
         # Reinitialize dspy with new parameters if any are provided
         if any([model, temperature, api_key, api_base]):
@@ -285,7 +286,7 @@ class KGGen:
         if self.retrieval_model is None:
             raise ValueError("No retrieval model provided")
         return dedup_cluster_graph(
-            retrieval_model=self.retrieval_model, lm=self.lm, graph=graph
+            retrieval_model=self.retrieval_model, lm=self.lm, graph=graph, max_workers=max_workers
         )
         
     def classify_entities(
