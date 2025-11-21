@@ -3,7 +3,7 @@ from typing import Union, List, Dict, Optional
 from kg_gen.steps._1_get_entities import get_entities
 from kg_gen.steps._2_get_relations import get_relations
 from kg_gen.steps._3_deduplicate import dedup_cluster_graph
-from kg_gen.steps._4_classify import classify_entities
+from kg_gen.steps._4_classify import classify_ontology_entities
 from kg_gen.utils.chunk_text import chunk_text
 from kg_gen.utils.visualize_kg import visualize as visualize_kg
 from kg_gen.models import Graph
@@ -158,8 +158,6 @@ class KGGen:
         cluster: bool = False,
         temperature: float = None,
         output_folder: Optional[str] = None,
-        ontology_definition: str = "",
-        ontology_classes: List[str] = [],
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -212,24 +210,14 @@ class KGGen:
                 relations = get_relations(
                     content, entities, is_conversation=is_conversation
                 )
-                if len(ontology_classes) != 0:                   
-                    classified_entries = classify_entities(
-                        input_data=content,
-                        entities=entities,
-                        ontology_definition=ontology_definition,
-                        ontology_classes=ontology_classes
-                    )
-                else:
-                    classified_entries = []
-                return entities, relations, classified_entries
+                return entities, relations
 
         if not chunk_size:
-            entities, relations, classified_entries = _process(processed_input, self.lm)
+            entities, relations = _process(processed_input, self.lm)
         else:
             chunks = chunk_text(processed_input, chunk_size)
             entities = set()
             relations = set()
-            classified_entries = set()
 
             with ThreadPoolExecutor() as executor:
                 future_to_chunk = {
@@ -237,21 +225,10 @@ class KGGen:
                 }
 
                 for future in as_completed(future_to_chunk):
-                    chunk_entities, chunk_relations, chunk_classified_entries = future.result()
+                    chunk_entities, chunk_relations = future.result()
                     entities.update(chunk_entities)
                     relations.update(chunk_relations)
-                    classified_entries.update(chunk_classified_entries)
-        
-        print(f"Classified entries: {classified_entries}")
-        print(f"Ontology entities: {ontology_classes}")
-        for ontology_entity in ontology_classes:
-            entities.append(ontology_entity)
-            
-            for entity, classification in classified_entries:
-                if classification == ontology_entity:
-                    relations.append((entity, "onotology_is_a", ontology_entity))
-                    print(f"Added ontology relation: {(entity, 'onotology_is_a', ontology_entity)}")
-        
+
         graph = Graph(
             entities=entities,
             relations=relations,
@@ -307,6 +284,68 @@ class KGGen:
         return dedup_cluster_graph(
             retrieval_model=self.retrieval_model, lm=self.lm, graph=graph
         )
+        
+    def classify_entities(
+        self,
+        graph: Graph,
+        processed_input: str,
+        ontology_definition: str,
+        ontology_classes: List[str],
+        chunk_size: Optional[int] = None,
+        model: str = None,
+        temperature: float = None,
+        api_key: str = None,
+        api_base: str = None,
+    ) -> Graph:
+        if len(ontology_classes) == 0:
+            print("No ontology classes provided, skipping classification step.")
+            return graph
+        
+        # Reinitialize dspy with new parameters if any are provided
+        if any([model, temperature, api_key, api_base]):
+            self.init_model(
+                model=model or self.model,
+                temperature=temperature or self.temperature,
+                api_key=api_key or self.api_key,
+                api_base=api_base or self.api_base,
+            )
+        def _process(content, lm):
+            with dspy.context(lm=lm):                 
+                classified_entries = classify_ontology_entities(
+                    input_data=content,
+                    entities=graph.entities,
+                    ontology_definition=ontology_definition,
+                    ontology_classes=ontology_classes
+                )
+                    
+            return classified_entries
+        
+        if not chunk_size:
+            classified_entries = _process(processed_input, self.lm)
+        else:
+            chunks = chunk_text(processed_input, chunk_size)
+            classified_entries = set()
+
+            with ThreadPoolExecutor() as executor:
+                future_to_chunk = {
+                    executor.submit(_process, chunk, self.lm): chunk for chunk in chunks
+                }
+
+                for future in as_completed(future_to_chunk):
+                    chunk_classified_entries = future.result()
+                    classified_entries.update(chunk_classified_entries)
+        
+        print(f"Classified entries: {classified_entries}")
+        print(f"Ontology entities: {ontology_classes}")
+        for ontology_entity in ontology_classes:
+            graph.entities.update([ontology_entity])
+            
+            for entity, classification in classified_entries:
+                if classification == ontology_entity:
+                    graph.relations.update([(entity, "ontology_is_a", ontology_entity)])
+                    print(f"Added ontology relation: {(entity, 'ontology_is_a', ontology_entity)}")
+        
+        return graph
 
     def aggregate(self, graphs: list[Graph]) -> Graph:
         # Initialize empty sets for combined graph

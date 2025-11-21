@@ -32,7 +32,7 @@ def get_classification_sig(ontology: str) -> dspy.Signature:
     return ClassifyEntities
     
     
-def classify_entities(
+def classify_ontology_entities(
     input_data: str,
     entities: list[str],
     ontology_definition: str,
