@@ -297,6 +297,7 @@ class KGGen:
 
         if self.retrieval_model is None:
             raise ValueError("No retrieval model provided")
+        
         return run_deduplication(
             lm=self.lm,
             graph=graph,
