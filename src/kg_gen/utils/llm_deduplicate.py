@@ -258,14 +258,14 @@ class LLMDeduplicate:
 
         return items, item_clusters
 
-    def deduplicate(self) -> Graph:
+    def deduplicate(self, max_workers: int = 4) -> Graph:
         # Check if intermediate progress exists and load it
         entities = set()
         edges = set()
         entity_clusters = {}
         edge_clusters = {}
 
-        pool = ThreadPoolExecutor(max_workers=64)
+        pool = ThreadPoolExecutor(max_workers=max_workers)
 
         # Process node clusters in parallel
         node_futures = []

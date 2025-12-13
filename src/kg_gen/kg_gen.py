@@ -1,9 +1,11 @@
+import time
 from typing import Union, List, Dict, Optional
 from typing_extensions import deprecated
 
 from kg_gen.steps._1_get_entities import get_entities
 from kg_gen.steps._2_get_relations import get_relations
 from kg_gen.steps._3_deduplicate import run_deduplication, DeduplicateMethod
+from kg_gen.steps._4_classify import classify_ontology_entities
 from kg_gen.utils.chunk_text import chunk_text
 from kg_gen.utils.visualize_kg import visualize as visualize_kg
 from kg_gen.models import Graph
@@ -11,6 +13,7 @@ import dspy
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import litellm
 import networkx as nx
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -166,6 +169,7 @@ class KGGen:
         deduplication_method: DeduplicateMethod | None = DeduplicateMethod.SEMHASH,
         temperature: float = None,
         output_folder: Optional[str] = None,
+        max_workers: int = 4
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -238,7 +242,7 @@ class KGGen:
             entities = set()
             relations = set()
 
-            with ThreadPoolExecutor() as executor:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_chunk = {
                     executor.submit(_process, chunk, self.lm): chunk for chunk in chunks
                 }
@@ -280,7 +284,7 @@ class KGGen:
         temperature: float = None,
         api_key: str = None,
         api_base: str = None,
-        context: str = "",  # TODO: implement context
+        max_workers: int = 4,
     ) -> Graph:
         # Reinitialize dspy with new parameters if any are provided
         if any([model, temperature, api_key, api_base]):
@@ -291,13 +295,89 @@ class KGGen:
                 api_base=api_base or self.api_base,
             )
 
+        if self.retrieval_model is None:
+            raise ValueError("No retrieval model provided")
         return run_deduplication(
             lm=self.lm,
             graph=graph,
             method=method,
             retrieval_model=self.retrieval_model,
             semhash_similarity_threshold=semhash_similarity_threshold,
+            max_workers=max_workers
         )
+        
+    def classify_entities(
+        self,
+        graph: Graph,
+        classification_context: str,
+        ontology_definition: str,
+        ontology_classes: List[str],
+        chunk_size: Optional[int] = None,
+        model: str = None,
+        temperature: float = None,
+        api_key: str = None,
+        api_base: str = None,
+        max_workers: int = 64,
+        logger: Optional[logging.Logger] = None,
+    ) -> Graph:
+        if len(ontology_classes) == 0:
+            print("No ontology classes provided, skipping classification step.")
+            return graph
+        
+        # Reinitialize dspy with new parameters if any are provided
+        if any([model, temperature, api_key, api_base]):
+            self.init_model(
+                model=model or self.model,
+                temperature=temperature or self.temperature,
+                api_key=api_key or self.api_key,
+                api_base=api_base or self.api_base,
+            )
+            
+        def _process(classification_context_chunk, lm):
+            try:
+                with dspy.context(lm=lm):
+                    if logger:
+                        logger.info(f"Classifying ontology entities... (size: {len(classification_context_chunk)}/{len(classification_context)})")
+                    classified_entries = classify_ontology_entities(
+                        classification_context=classification_context_chunk,
+                        entities=graph.entities,
+                        ontology_definition=ontology_definition,
+                        ontology_classes=ontology_classes
+                    )
+                return classified_entries
+            
+            except litellm.RateLimitError:
+                if logger:
+                    logger.warning("Rate limit exceeded, retrying after 5 second delay...")
+                time.sleep(5)  # Wait before retrying
+                return _process(classification_context_chunk, lm)
+        
+        if not chunk_size:
+            classified_entries = _process(classification_context, self.lm)
+        else:
+            chunks = chunk_text(classification_context, chunk_size)
+            classified_entries = set()
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_chunk = {
+                    executor.submit(_process, chunk, self.lm): chunk for chunk in chunks
+                }
+
+                for future in as_completed(future_to_chunk):
+                    chunk_classified_entries = future.result()
+                    classified_entries.update(chunk_classified_entries)
+        
+        print(f"Classified entries: {classified_entries}")
+        print(f"Ontology entities: {ontology_classes}")
+        for ontology_entity in ontology_classes:
+            graph.entities.update([ontology_entity])
+            
+            for entity, classification in classified_entries:
+                if classification == ontology_entity:
+                    graph.relations.update([(entity, "ontology_is_a", ontology_entity)])
+                    print(f"Added ontology relation: {(entity, 'ontology_is_a', ontology_entity)}")
+        
+        return graph
 
     def aggregate(self, graphs: list[Graph]) -> Graph:
         # Initialize empty sets for combined graph
