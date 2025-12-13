@@ -284,6 +284,7 @@ class KGGen:
         temperature: float = None,
         api_key: str = None,
         api_base: str = None,
+        context: str = "",  # TODO: implement context
         max_workers: int = 4,
     ) -> Graph:
         # Reinitialize dspy with new parameters if any are provided
@@ -297,6 +298,9 @@ class KGGen:
 
         if self.retrieval_model is None:
             raise ValueError("No retrieval model provided")
+        
+        if context != "":
+            logger.warning("Deduplication context parameter is not yet implemented.")
         
         return run_deduplication(
             lm=self.lm,
