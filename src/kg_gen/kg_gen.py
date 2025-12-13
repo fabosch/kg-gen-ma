@@ -1,9 +1,10 @@
 import time
 from typing import Union, List, Dict, Optional
+from typing_extensions import deprecated
 
 from kg_gen.steps._1_get_entities import get_entities
 from kg_gen.steps._2_get_relations import get_relations
-from kg_gen.steps._3_deduplicate import dedup_cluster_graph
+from kg_gen.steps._3_deduplicate import run_deduplication, DeduplicateMethod
 from kg_gen.steps._4_classify import classify_ontology_entities
 from kg_gen.utils.chunk_text import chunk_text
 from kg_gen.utils.visualize_kg import visualize as visualize_kg
@@ -21,6 +22,8 @@ import numpy as np
 # Configure dspy logging to only show errors
 import logging
 
+logger = logging.getLogger(__name__)
+
 dspy_logger = logging.getLogger("dspy")
 dspy_logger.setLevel(logging.CRITICAL)
 
@@ -35,6 +38,7 @@ class KGGen:
         api_key: str = None,
         api_base: str = None,
         retrieval_model: Optional[str] = None,
+        disable_cache: bool = False,
     ):
         """Initialize KGGen with optional model configuration
 
@@ -52,6 +56,7 @@ class KGGen:
         self.api_base = api_base
         self.retrieval_model: Optional[SentenceTransformer] = None
         self.lm = None
+        self.disable_cache = disable_cache
 
         self.init_model(
             model=model,
@@ -62,12 +67,6 @@ class KGGen:
             api_base=api_base,
             retrieval_model=retrieval_model,
         )
-
-    def validate_reasoning_effort(self, reasoning_effort: str):
-        if "gpt-5" not in self.model and reasoning_effort is not None:
-            raise ValueError(
-                "Reasoning effort is only supported for gpt-5 family models"
-            )
 
     def validate_temperature(self, temperature: float):
         if "gpt-5" in self.model and temperature < 1.0:
@@ -117,7 +116,6 @@ class KGGen:
             self.retrieval_model = SentenceTransformer(retrieval_model)
 
         self.validate_temperature(self.temperature)
-        self.validate_reasoning_effort(self.reasoning_effort)
         self.validate_max_tokens(self.max_tokens)
 
         # Initialize dspy LM with current settings
@@ -129,6 +127,11 @@ class KGGen:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 api_base=self.api_base,
+                cache=not self.disable_cache,
+                model_type="responses" if self.model.startswith("openai/") else "chat",
+                allowed_openai_params=["reasoning_effort"]
+                if self.api_base is None
+                else None,
             )
         else:
             self.lm = dspy.LM(
@@ -137,6 +140,11 @@ class KGGen:
                 max_tokens=self.max_tokens,
                 api_base=self.api_base,
                 reasoning_effort=self.reasoning_effort,
+                cache=not self.disable_cache,
+                model_type="responses" if self.model.startswith("openai/") else "chat",
+                allowed_openai_params=["reasoning_effort"]
+                if self.api_base is None
+                else None,
             )
 
     @staticmethod
@@ -157,7 +165,8 @@ class KGGen:
         api_base: str = None,
         context: str = "",
         chunk_size: Optional[int] = None,
-        cluster: bool = False,
+        reasoning_effort: str = None,
+        deduplication_method: DeduplicateMethod | None = DeduplicateMethod.SEMHASH,
         temperature: float = None,
         output_folder: Optional[str] = None,
         max_workers: int = 4
@@ -199,12 +208,13 @@ class KGGen:
             processed_input = input_data
 
         # Reinitialize dspy with new parameters if any are provided
-        if any([model, temperature, api_key, api_base]):
+        if any([model, temperature, api_key, api_base, reasoning_effort]):
             self.init_model(
                 model=model or self.model,
                 temperature=temperature or self.temperature,
                 api_key=api_key or self.api_key,
                 api_base=api_base or self.api_base,
+                reasoning_effort=reasoning_effort or self.reasoning_effort,
             )
 
         def _process(content, lm):
@@ -216,8 +226,18 @@ class KGGen:
                 return entities, relations
 
         if not chunk_size:
-            entities, relations = _process(processed_input, self.lm)
-        else:
+            try:
+                entities, relations = _process(processed_input, self.lm)
+            except Exception as e:
+                if "context length" in str(e).lower():
+                    logger.warning(
+                        f"Context length error: {e}. Chunking text with chunk size 16384."
+                    )
+                    chunk_size = 16384
+                else:
+                    raise e
+
+        if chunk_size:
             chunks = chunk_text(processed_input, chunk_size)
             entities = set()
             relations = set()
@@ -238,36 +258,28 @@ class KGGen:
             edges={relation[1] for relation in relations},
         )
 
-        if cluster:
-            graph = self.cluster(graph, context)
+        if deduplication_method:
+            graph = self.deduplicate(
+                graph, method=deduplication_method, context=context
+            )
 
         if output_folder:
-            os.makedirs(output_folder, exist_ok=True)
-            output_path = os.path.join(output_folder, "graph.json")
-
-            graph_dict = {
-                "entities": list(entities),
-                "relations": list(relations),
-                "edges": list(graph.edges),
-                "entity_clusters": {
-                    k: list(v) for k, v in graph.entity_clusters.items()
-                }
-                if graph.entity_clusters
-                else None,
-                "edge_clusters": {k: list(v) for k, v in graph.edge_clusters.items()}
-                if graph.edge_clusters
-                else None,
-            }
-
-            with open(output_path, "w") as f:
-                json.dump(graph_dict, f, indent=2)
-
+            self.export_graph(graph, os.path.join(output_folder, "graph.json"))
         return graph
 
+    @deprecated("Use KGGen.deduplicate() method instead")
     def cluster(
         self,
         graph: Graph,
-        context: str = "",
+        **kwargs,
+    ) -> Graph:
+        return self.deduplicate(graph, **kwargs)
+
+    def deduplicate(
+        self,
+        graph: Graph,
+        method: DeduplicateMethod = DeduplicateMethod.FULL,
+        semhash_similarity_threshold: float = 0.95,  # recommended to keep at 0.95
         model: str = None,
         temperature: float = None,
         api_key: str = None,
@@ -285,8 +297,13 @@ class KGGen:
 
         if self.retrieval_model is None:
             raise ValueError("No retrieval model provided")
-        return dedup_cluster_graph(
-            retrieval_model=self.retrieval_model, lm=self.lm, graph=graph, max_workers=max_workers
+        return run_deduplication(
+            lm=self.lm,
+            graph=graph,
+            method=method,
+            retrieval_model=self.retrieval_model,
+            semhash_similarity_threshold=semhash_similarity_threshold,
+            max_workers=max_workers
         )
         
     def classify_entities(
@@ -367,15 +384,27 @@ class KGGen:
         all_entities = set()
         all_relations = set()
         all_edges = set()
+        all_entity_metadata: dict[str, set[str]] = {}
 
         # Combine all graphs
         for graph in graphs:
             all_entities.update(graph.entities)
             all_relations.update(graph.relations)
             all_edges.update(graph.edges)
+            if graph.entity_metadata:
+                for entity, metadata_set in graph.entity_metadata.items():
+                    if entity in all_entity_metadata:
+                        all_entity_metadata[entity].update(metadata_set)
+                    else:
+                        all_entity_metadata[entity] = metadata_set.copy()
 
         # Create and return aggregated graph
-        return Graph(entities=all_entities, relations=all_relations, edges=all_edges)
+        return Graph(
+            entities=all_entities,
+            relations=all_relations,
+            edges=all_edges,
+            entity_metadata=all_entity_metadata if all_entity_metadata else None,
+        )
 
     @staticmethod
     def visualize(graph: Graph, output_path: str, open_in_browser: bool = False):
@@ -415,6 +444,7 @@ class KGGen:
         node_embeddings = {node: model.encode(node).tolist() for node in graph.nodes}
         relation_embeddings = {
             rel: model.encode(rel).tolist()
+            # TODO: this is triggering index out of range error
             for rel in set(edge[2]["relation"] for edge in graph.edges(data=True))
         }
         return node_embeddings, relation_embeddings
@@ -477,3 +507,49 @@ class KGGen:
 
         explore_neighbors(node, 1)
         return list(context)
+
+    @staticmethod
+    def export_graph(graph: Graph, output_path: str):
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        graph_dict = {
+            "entities": list(graph.entities),
+            "relations": list(graph.relations),
+            "edges": list(graph.edges),
+            "entity_clusters": {k: list(v) for k, v in graph.entity_clusters.items()}
+            if graph.entity_clusters
+            else None,
+            "edge_clusters": {k: list(v) for k, v in graph.edge_clusters.items()}
+            if graph.edge_clusters
+            else None,
+            "entity_metadata": graph.entity_metadata,
+        }
+
+        with open(output_path, "w") as f:
+            json.dump(graph_dict, f, indent=2)
+
+    # ====== Token Usage ======
+    def reset_token_usage(self):
+        self.lm.history = []
+
+    def extract_token_usage_from_history(self) -> Dict[str, int]:
+        """Extract token usage from dspy LM history."""
+
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_tokens = 0
+
+        for entry in self.lm.history:
+            if isinstance(entry, dict):
+                # Check for usage information in various possible locations
+                usage = entry.get("usage") or entry.get("response", {}).get("usage")
+
+                if usage:
+                    total_prompt_tokens += usage.get("prompt_tokens", 0)
+                    total_completion_tokens += usage.get("completion_tokens", 0)
+                    total_tokens += usage.get("total_tokens", 0)
+
+        return {
+            "prompt_tokens": total_prompt_tokens,
+            "completion_tokens": total_completion_tokens,
+            "total_tokens": total_tokens,
+        }
