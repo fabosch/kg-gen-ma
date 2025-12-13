@@ -128,7 +128,8 @@ class KGGen:
                 max_tokens=self.max_tokens,
                 api_base=self.api_base,
                 cache=not self.disable_cache,
-                model_type="responses" if self.model.startswith("openai/") else "chat",
+                # model_type="responses" if self.model.startswith("openai/") else "chat",
+                model_type="chat", # TODO: this is hack so I can use the api provided by an Open Webui instance
                 allowed_openai_params=["reasoning_effort"]
                 if self.api_base is None
                 else None,
@@ -141,7 +142,8 @@ class KGGen:
                 api_base=self.api_base,
                 reasoning_effort=self.reasoning_effort,
                 cache=not self.disable_cache,
-                model_type="responses" if self.model.startswith("openai/") else "chat",
+                # model_type="responses" if self.model.startswith("openai/") else "chat",
+                model_type="chat", # TODO: this is hack so I can use the api provided by an Open Webui instance
                 allowed_openai_params=["reasoning_effort"]
                 if self.api_base is None
                 else None,
