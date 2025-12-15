@@ -16,6 +16,7 @@ class Graph(BaseModel):
     edge_clusters: Optional[dict[str, set[str]]] = None
 
     entity_metadata: dict[str, set[str]] | None = None
+    entity_classifications: dict[str, str] | None = None
 
     @staticmethod
     def from_file(file_path: str) -> "Graph":

@@ -72,6 +72,20 @@ def _build_view_model(graph: Graph) -> dict[str, Any]:
         for entity in entities:
             node_color_lookup[entity] = _string_to_color(f"entity::{entity}")
 
+    # Apply ontology classifications if available (highest priority coloring)
+    ontology_classifications = graph.entity_classifications or {}
+    ontology_colors: dict[str, str] = {}
+    
+    for entity, ontology_class in ontology_classifications.items():
+        if ontology_class not in ontology_colors:
+            color = _string_to_color(f"ontology::{ontology_class}")
+            ontology_colors[ontology_class] = color
+        else:
+            color = ontology_colors[ontology_class]
+        
+        # Override node color with ontology color
+        node_color_lookup[entity] = color
+
     edge_member_to_cluster: dict[str, str] = {}
     edge_color_lookup: dict[str, str] = {}
     edge_cluster_view: list[dict[str, Any]] = []
@@ -255,6 +269,8 @@ def _build_view_model(graph: Graph) -> dict[str, Any]:
         "isolatedEntities": isolated_entities,
         "components": components,
         "relations": relation_records,
+        "ontologyColors": ontology_colors,
+        "ontologyClassifications": ontology_classifications,
     }
 
 

@@ -376,13 +376,21 @@ class KGGen:
         
         print(f"Classified entries: {classified_entries}")
         print(f"Ontology entities: {ontology_classes}")
+        
+        # Initialize classifications dictionary if needed
+        if graph.entity_classifications is None:
+            graph.entity_classifications = {}
+        
         for ontology_entity in ontology_classes:
             graph.entities.update([ontology_entity])
             
             for entity, classification in classified_entries:
                 if classification == ontology_entity:
                     graph.relations.update([(entity, "ontology_is_a", ontology_entity)])
+                    # Store classification in entity_classifications for visualization
+                    graph.entity_classifications[entity] = ontology_entity
                     print(f"Added ontology relation: {(entity, 'ontology_is_a', ontology_entity)}")
+                    print(f"Stored classification: {entity} -> {ontology_entity}")
         
         return graph
 
