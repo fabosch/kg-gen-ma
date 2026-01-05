@@ -13,14 +13,9 @@ class ClassificationRelation(BaseModel):
     classification: str = dspy.InputField(desc="Classification or NONE", examples=["Component", "Connector", "NONE"])
     is_none: str = dspy.InputField(desc="Is classification NONE", examples=["False", "True"])
 
-def get_classification_sig(ontology: str) -> dspy.Signature:
+def get_classification_sig(wrapper_prompt: str, ontology: str) -> dspy.Signature:
     class ClassifyEntities(dspy.Signature):
-        __doc__ = f"""Classify key entities from the source text according to the following ontology if possible. 
-        Classify according to their type, based on the ONTOLOGY and the list of ontology classes provided. Provide NONE if no type matches.
-        BEGIN ONTOLOGY:
-        {ontology}
-        END ONTOLOGY.
-        Please be THOROUGH and accurate to the reference text."""
+        __doc__ = wrapper_prompt.replace("____ONTOLOGY____", ontology)
 
         source_text: str = dspy.InputField(desc="Source text containing the entities to classify")
         entities: list[str] = dspy.InputField(desc="THOROUGH list of already identified key entities")
@@ -35,10 +30,11 @@ def get_classification_sig(ontology: str) -> dspy.Signature:
 def classify_ontology_entities(
     classification_context: str,
     entities: list[str],
+    classification_prompt: str,
     ontology_definition: str,
     ontology_classes: List[str],
 ) -> List[Tuple[str, str]]:
-    classification_sig = get_classification_sig(ontology_definition)
+    classification_sig = get_classification_sig(classification_prompt, ontology_definition)
     try:
         extract = dspy.Predict(classification_sig)
         result = extract(source_text=classification_context, entities=entities, ontology_classes=ontology_classes)

@@ -317,6 +317,7 @@ class KGGen:
         self,
         graph: Graph,
         classification_context: str,
+        classification_prompt: str,
         ontology_definition: str,
         ontology_classes: List[str],
         chunk_size: Optional[int] = None,
@@ -347,7 +348,7 @@ class KGGen:
                         logger.info(f"Classifying ontology entities... (size: {len(classification_context_chunk)}/{len(classification_context)})")
                     classified_entries = classify_ontology_entities(
                         classification_context=classification_context_chunk,
-                        entities=graph.entities,
+                        entities=graph.entities,    classification_prompt=classification_prompt,
                         ontology_definition=ontology_definition,
                         ontology_classes=ontology_classes
                     )
