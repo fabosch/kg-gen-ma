@@ -165,9 +165,37 @@ def run_semhash_deduplication(
             else:
                 new_entity_metadata[deduped_entity] = metadata_set.copy()
 
+    # Create entity_clusters: map representative to all entities that map to it
+    entity_clusters: dict[str, set[str]] = {}
+    for original_entity in graph.entities:
+        if original_entity in entities_dedup.original_map:
+            normalized = entities_dedup.original_map[original_entity]
+            representative = entities_dedup.items_map[normalized]
+        else:
+            representative = original_entity
+        
+        if representative not in entity_clusters:
+            entity_clusters[representative] = set()
+        entity_clusters[representative].add(original_entity)
+
+    # Create edge_clusters: map representative to all edges that map to it
+    edge_clusters: dict[str, set[str]] = {}
+    for original_edge in graph.edges:
+        if original_edge in edges_dedup.original_map:
+            normalized = edges_dedup.original_map[original_edge]
+            representative = edges_dedup.items_map[normalized]
+        else:
+            representative = original_edge
+        
+        if representative not in edge_clusters:
+            edge_clusters[representative] = set()
+        edge_clusters[representative].add(original_edge)
+
     return Graph(
         entities=new_entities,
         edges=new_edges,
         relations=new_relations,
         entity_metadata=new_entity_metadata,
+        entity_clusters=entity_clusters,
+        edge_clusters=edge_clusters,
     )
