@@ -286,7 +286,21 @@ class LLMDeduplicate:
             try:
                 cluster_entities, cluster_entity_map = future.result()
                 entities.update(cluster_entities)
-                entity_clusters.update(cluster_entity_map)
+                # Merge with incoming clusters from previous deduplication stage
+                for rep, cluster_members in cluster_entity_map.items():
+                    if rep not in entity_clusters:
+                        entity_clusters[rep] = set()
+                    # If input graph has clusters, expand each member to include its cluster
+                    if self.graph.entity_clusters:
+                        for member in cluster_members:
+                            if member in self.graph.entity_clusters:
+                                # Member was a representative in previous stage, merge its cluster
+                                entity_clusters[rep].update(self.graph.entity_clusters[member])
+                            else:
+                                # Member was not a representative, just add it
+                                entity_clusters[rep].add(member)
+                    else:
+                        entity_clusters[rep].update(cluster_members)
             except Exception as e:
                 self.logger.error("Error processing node cluster %s: %s", i, e)
 
@@ -295,7 +309,21 @@ class LLMDeduplicate:
             try:
                 cluster_edges, cluster_edge_map = future.result()
                 edges.update(cluster_edges)
-                edge_clusters.update(cluster_edge_map)
+                # Merge with incoming clusters from previous deduplication stage
+                for rep, cluster_members in cluster_edge_map.items():
+                    if rep not in edge_clusters:
+                        edge_clusters[rep] = set()
+                    # If input graph has clusters, expand each member to include its cluster
+                    if self.graph.edge_clusters:
+                        for member in cluster_members:
+                            if member in self.graph.edge_clusters:
+                                # Member was a representative in previous stage, merge its cluster
+                                edge_clusters[rep].update(self.graph.edge_clusters[member])
+                            else:
+                                # Member was not a representative, just add it
+                                edge_clusters[rep].add(member)
+                    else:
+                        edge_clusters[rep].update(cluster_members)
             except Exception as e:
                 self.logger.error("Error processing edge cluster %s: %s", i, e)
 
