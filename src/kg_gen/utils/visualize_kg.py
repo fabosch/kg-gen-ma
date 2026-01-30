@@ -27,6 +27,63 @@ def _sorted_ignore_case(items: Iterable[str]) -> list[str]:
     return sorted(items, key=lambda value: value.lower())
 
 
+def _build_ontology_color_lookup(graph: Graph) -> dict[str, str]:
+    """Build a color lookup for nodes based on their simple ontology classification.
+    
+    Extracts ontology classifications from entity_metadata and assigns a consistent
+    color to all nodes with the same classification. Also identifies ontology class
+    nodes themselves and colors them consistently.
+    
+    Args:
+        graph: Graph instance with entity_metadata containing ontology classifications.
+        
+    Returns:
+        Dictionary mapping entity names to hex color codes based on their ontology class.
+    """
+    ontology_color_lookup: dict[str, str] = {}
+    ontology_class_to_color: dict[str, str] = {}
+    
+    if not graph.entity_metadata:
+        return ontology_color_lookup
+    
+    # Extract all unique ontology class names (these are the class nodes themselves)
+    all_ontology_classes = set()
+    
+    # First pass: identify unique ontology classes and assign colors to classified entities
+    for entity, metadata_set in graph.entity_metadata.items():
+        if not metadata_set:
+            continue
+        
+        for metadata in metadata_set:
+            # Extract ontology classification (format: "ontology_class_simple:ClassName")
+            if metadata.startswith("ontology_class_simple:"):
+                class_name = metadata.replace("ontology_class_simple:", "", 1)
+                all_ontology_classes.add(class_name)
+                
+                # Assign a color to this ontology class if we haven't already
+                if class_name not in ontology_class_to_color:
+                    ontology_class_to_color[class_name] = _string_to_color(f"ontology::{class_name}")
+    
+    # Second pass: map entities to their ontology class colors
+    for entity, metadata_set in graph.entity_metadata.items():
+        if not metadata_set:
+            continue
+        
+        for metadata in metadata_set:
+            if metadata.startswith("ontology_class_simple:"):
+                class_name = metadata.replace("ontology_class_simple:", "", 1)
+                ontology_color_lookup[entity] = ontology_class_to_color[class_name]
+                break  # Use the first ontology classification if multiple exist
+    
+    # Third pass: color the ontology class nodes themselves with the same color as their classified entities
+    for class_name in all_ontology_classes:
+        if class_name in graph.entities:
+            # Give the ontology class node the same color as entities it classifies
+            ontology_color_lookup[class_name] = ontology_class_to_color[class_name]
+    
+    return ontology_color_lookup
+
+
 def _build_view_model(graph: Graph) -> dict[str, Any]:
     # Collect all entities from both the entities set and relations
     all_entities = set(graph.entities)
@@ -63,13 +120,25 @@ def _build_view_model(graph: Graph) -> dict[str, Any]:
         for member in ordered_members:
             entity_member_to_cluster[member] = representative
 
+    # Build ontology-based color lookup if metadata is available
+    ontology_color_lookup = _build_ontology_color_lookup(graph)
+
     node_color_lookup: dict[str, str] = {}
+    
+    # Apply entity cluster coloring first (if available)
     if cluster_view:
         for cluster in cluster_view:
             for member in cluster["members"]:
                 node_color_lookup[member] = cluster["color"]
-    else:
-        for entity in entities:
+    
+    # Then, apply ontology-based coloring (this takes precedence over clusters if both exist)
+    # Ontology classification provides semantic meaning, so it should override generic clustering
+    if ontology_color_lookup:
+        node_color_lookup.update(ontology_color_lookup)
+    
+    # Finally, ensure all entities have a color (fill in any that don't)
+    for entity in entities:
+        if entity not in node_color_lookup:
             node_color_lookup[entity] = _string_to_color(f"entity::{entity}")
 
     edge_member_to_cluster: dict[str, str] = {}
