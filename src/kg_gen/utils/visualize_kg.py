@@ -28,59 +28,101 @@ def _sorted_ignore_case(items: Iterable[str]) -> list[str]:
 
 
 def _build_ontology_color_lookup(graph: Graph) -> dict[str, str]:
-    """Build a color lookup for nodes based on their simple ontology classification.
-    
-    Extracts ontology classifications from entity_metadata and assigns a consistent
-    color to all nodes with the same classification. Also identifies ontology class
-    nodes themselves and colors them consistently.
-    
+    """Build a color lookup for nodes based on their simple or composite ontology classifications.
+
+    This function extracts both simple (`ontology_class_simple:`) and composite
+    (`ontology_class_composite:`) classifications from entity metadata and assigns
+    a consistent, *distinct* color to each ontology class. Colors are generated as
+    evenly spaced hues to maximize visual separation between different classes.
+
+    Behavior notes:
+    - If a class exists both as a simple and composite class with the same literal
+      name, the composite classification takes precedence for coloring the class node.
+
     Args:
         graph: Graph instance with entity_metadata containing ontology classifications.
-        
+
     Returns:
         Dictionary mapping entity names to hex color codes based on their ontology class.
     """
     ontology_color_lookup: dict[str, str] = {}
-    ontology_class_to_color: dict[str, str] = {}
-    
+    class_to_key: dict[str, str] = {}  # map class literal to prefixed key (e.g., 'simple::X' or 'composite::Y')
+
     if not graph.entity_metadata:
         return ontology_color_lookup
-    
-    # Extract all unique ontology class names (these are the class nodes themselves)
-    all_ontology_classes = set()
-    
-    # First pass: identify unique ontology classes and assign colors to classified entities
+
+    # Collect all unique ontology class keys (prefixed to distinguish simple vs composite)
+    unique_class_keys: list[str] = []
     for entity, metadata_set in graph.entity_metadata.items():
         if not metadata_set:
             continue
-        
         for metadata in metadata_set:
-            # Extract ontology classification (format: "ontology_class_simple:ClassName")
             if metadata.startswith("ontology_class_simple:"):
-                class_name = metadata.replace("ontology_class_simple:", "", 1)
-                all_ontology_classes.add(class_name)
-                
-                # Assign a color to this ontology class if we haven't already
-                if class_name not in ontology_class_to_color:
-                    ontology_class_to_color[class_name] = _string_to_color(f"ontology::{class_name}")
-    
-    # Second pass: map entities to their ontology class colors
+                cls = metadata.replace("ontology_class_simple:", "", 1)
+                key = f"simple::{cls}"
+                if key not in class_to_key.values():
+                    unique_class_keys.append(key)
+                class_to_key[cls] = class_to_key.get(cls, key)  # preserve first mapping
+            elif metadata.startswith("ontology_class_composite:"):
+                cls = metadata.replace("ontology_class_composite:", "", 1)
+                key = f"composite::{cls}"
+                # ensure composite keys are preferred (put them in list if not present)
+                if key not in unique_class_keys:
+                    unique_class_keys.append(key)
+                class_to_key[cls] = key  # composite overrides simple mapping
+
+    # Deduplicate while preserving order
+    unique_class_keys = list(dict.fromkeys(unique_class_keys))
+
+    # Generate an evenly spaced palette of colors for the ontology classes
+    colors: dict[str, str] = {}
+    n = len(unique_class_keys)
+    if n > 0:
+        for idx, key in enumerate(unique_class_keys):
+            # Evenly space hues around the color wheel; use fixed saturation/lightness
+            hue = idx / max(1, n)
+            saturation = 0.65
+            lightness = 0.55
+            r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
+            colors[key] = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+    # Map entities to their ontology class color (composite preferred over simple when both exist)
     for entity, metadata_set in graph.entity_metadata.items():
         if not metadata_set:
             continue
-        
+        assigned = False
+        # Prefer composite classifications
+        for metadata in metadata_set:
+            if metadata.startswith("ontology_class_composite:"):
+                cls = metadata.replace("ontology_class_composite:", "", 1)
+                key = f"composite::{cls}"
+                if key in colors:
+                    ontology_color_lookup[entity] = colors[key]
+                    assigned = True
+                    break
+        if assigned:
+            continue
+        # Fallback to simple classifications
         for metadata in metadata_set:
             if metadata.startswith("ontology_class_simple:"):
-                class_name = metadata.replace("ontology_class_simple:", "", 1)
-                ontology_color_lookup[entity] = ontology_class_to_color[class_name]
-                break  # Use the first ontology classification if multiple exist
-    
-    # Third pass: color the ontology class nodes themselves with the same color as their classified entities
-    for class_name in all_ontology_classes:
-        if class_name in graph.entities:
-            # Give the ontology class node the same color as entities it classifies
-            ontology_color_lookup[class_name] = ontology_class_to_color[class_name]
-    
+                cls = metadata.replace("ontology_class_simple:", "", 1)
+                key = f"simple::{cls}"
+                if key in colors:
+                    ontology_color_lookup[entity] = colors[key]
+                    assigned = True
+                    break
+
+    # Also color the ontology class nodes themselves (if present in the entity set)
+    # If both composite and simple exist for a given literal class name, composite is preferred
+    # to color the class node so that composite semantics are visible.
+    for literal_class in set(class_to_key.keys()):
+        pref_key = class_to_key.get(literal_class)
+        if not pref_key:
+            continue
+        color = colors.get(pref_key)
+        if color and literal_class in graph.entities:
+            ontology_color_lookup[literal_class] = color
+
     return ontology_color_lookup
 
 
