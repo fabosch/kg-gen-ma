@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Union, List, Dict, Optional
 from typing_extensions import deprecated
 
@@ -12,7 +14,6 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import networkx as nx
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
@@ -51,7 +52,7 @@ class KGGen:
         self.temperature = temperature
         self.api_key = api_key
         self.api_base = api_base
-        self.retrieval_model: Optional[SentenceTransformer] = None
+        self.retrieval_model: Optional[object] = None  # SentenceTransformer - lazy loaded
         self.lm = None
         self.disable_cache = disable_cache
 
@@ -110,6 +111,7 @@ class KGGen:
         if reasoning_effort is not None:
             self.reasoning_effort = reasoning_effort
         if retrieval_model is not None:
+            from sentence_transformers import SentenceTransformer
             self.retrieval_model = SentenceTransformer(retrieval_model)
 
         self.validate_temperature(self.temperature)
