@@ -130,7 +130,8 @@ class KGGen:
                 api_base=self.api_base,
                 cache=not self.disable_cache,
                 # model_type="responses" if self.model.startswith("openai/") else "chat",
-                model_type="chat" # I need this, otherwise my API wrapper wont work.
+                model_type="chat", # I need this, otherwise my API wrapper wont work.
+                num_retries=2
             )
         else:
             self.lm = dspy.LM(
@@ -143,7 +144,8 @@ class KGGen:
                 else None,
                 cache=not self.disable_cache,
                 # model_type="responses" if self.model.startswith("openai/") else "chat",
-                model_type="chat" # I need this, otherwise my API wrapper wont work.
+                model_type="chat", # I need this, otherwise my API wrapper wont work.
+                num_retries=2
             )
 
     @staticmethod
