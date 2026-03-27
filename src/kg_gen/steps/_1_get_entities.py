@@ -101,9 +101,9 @@ def get_entities(
         )
 
     extract = (
-        dspy.Predict(ConversationEntities)
+        dspy.Predict(ConversationEntities, config={"tool_choice": "none"})
         if is_conversation
-        else dspy.Predict(TextEntities)
+        else dspy.Predict(TextEntities, config={"tool_choice": "none"})
     )
     result = extract(source_text=input_data)
     return result.entities

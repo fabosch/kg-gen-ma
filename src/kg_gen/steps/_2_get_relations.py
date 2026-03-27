@@ -274,7 +274,7 @@ def get_relations(
             relations: list[Relation] = dspy.InputField()
             fixed_relations: list[Relation] = dspy.OutputField()
 
-        fix = dspy.ChainOfThought(FixedRelations)
+        fix = dspy.ChainOfThought(FixedRelations, config={"tool_choice": "none"})
 
         fix_res = fix(
             source_text=input_data, entities=entities, relations=result.relations

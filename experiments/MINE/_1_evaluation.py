@@ -43,7 +43,7 @@ class EvaluateResponse(dspy.Signature):
 class ResponseEvaluator(dspy.Module):
     def __init__(self):
         super().__init__()
-        self.evaluate = dspy.ChainOfThought(EvaluateResponse)
+        self.evaluate = dspy.ChainOfThought(EvaluateResponse, config={"tool_choice": "none"})
 
     def forward(self, context, correct_answer):
         return self.evaluate(context=context, correct_answer=correct_answer)
