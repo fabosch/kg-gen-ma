@@ -68,8 +68,6 @@ class DeduplicateList:
         semhash = SemHash.from_records(records=list(normalized_items))
         deduplication_result = semhash.self_deduplicate(threshold=self.threshold)
 
-        print(deduplication_result)
-
         try:
             self.deduplicated_items = len(deduplication_result.selected)
             self.duplicate_items = len(deduplication_result.duplicates)
