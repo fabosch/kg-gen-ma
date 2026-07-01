@@ -68,12 +68,26 @@ class DeduplicateList:
         semhash = SemHash.from_records(records=list(normalized_items))
         deduplication_result = semhash.self_deduplicate(threshold=self.threshold)
 
-        self.deduplicated_items = len(deduplication_result.selected)
-        self.duplicate_items = len(deduplication_result.duplicates)
-        self.reduction = (self.duplicate_items / self.total_items) * 100
+        print(deduplication_result)
 
-        # Map back to original strings
-        duplicates = deduplication_result.duplicates
+        try:
+            self.deduplicated_items = len(deduplication_result.selected)
+            self.duplicate_items = len(deduplication_result.duplicates)
+            self.reduction = (self.duplicate_items / self.total_items) * 100
+
+            # Map back to original strings
+            duplicates = deduplication_result.duplicates
+
+            selected = deduplication_result.selected
+        except Exception as e:
+            print(f"Error calculating deduplication stats: {e}")
+            self.deduplicated_items = 0
+            self.duplicate_items = 0
+            self.reduction = 0.0
+
+            duplicates = []
+            selected = list(normalized_items)
+        
         for duplicate in duplicates:
             original = duplicate.record
             # Check if duplicates list is not empty before accessing
@@ -87,7 +101,7 @@ class DeduplicateList:
                 if not original in self.duplicates:
                     self.duplicates[original] = duplicate_value
 
-        self.deduplicated = deduplication_result.selected
+        self.deduplicated = selected
 
     def stats(self) -> str:
         return f"Total items: {self.total_items}; Deduplicated items: {self.deduplicated_items}; Duplicate items: {self.duplicate_items}; Reduction: {self.reduction:.1f}"
